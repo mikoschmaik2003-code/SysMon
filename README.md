@@ -3,7 +3,8 @@
 Task-Manager-Ersatz auf **einem** Bildschirm: alle 24 logischen CPU-Kerne mit
 Takt pro Kern, die komplette GPU-Sektion (3D, Encode, Decode, VRAM, Temp, Power,
 Takt, Lüfter), RAM, alle Datenträger mit MB/s und IO/s sowie Netzwerk — plus eine
-zweite, komplett andere Optik im Linux-Terminal-Stil.
+zweite, komplett andere Optik im Linux-Terminal-Stil und eine Netz-&-System-Ansicht
+mit IP-Konfiguration, Ping und nützlichen Werkzeugen.
 
 ## Installation
 
@@ -24,21 +25,22 @@ SysMon.bat
 (oder `python app.py` — braucht nur `psutil`, GUI ist tkinter, alles andere direkt
 über Windows-/NVIDIA-DLLs)
 
-## Zwei Ansichten
+## Drei Ansichten
 
 | | |
 |---|---|
 | **GRAFIK** | Task-Manager-Optik: gefüllte Verlaufskurven, 60-Sekunden-Fenster, ein Mini-Graph pro logischem Prozessor inkl. dessen aktuellem Takt |
 | **TERMINAL** | monospace ASCII-Balken (`████░░░░`) mit denselben Metrikfarben, dazu Top-Prozesse nach CPU, RAM, GPU und VRAM (MB je App) nebeneinander |
+| **NETZ** | IP-Konfiguration aller Adapter (IPv4/IPv6, Maske, Gateway, DNS, DHCP, MAC, Linkspeed, Durchsatz), Live-Ping zu Router und Internet mit Verlauf, offene Ports mit Programm, Laufwerksbelegung, System (Windows-Version, Mainboard, BIOS, GPU-Treiber). Oben Knöpfe: IP kopieren, öffentliche IP abfragen, DNS-Cache leeren und Windows-Werkzeuge öffnen (Netzwerkverbindungen, Geräte-Manager, Task-Manager, Ressourcenmonitor, Ereignisanzeige, Systeminfo). Klick auf eine Adresse kopiert sie. |
 
 ## Tasten
 
 | Taste | Funktion |
 |---|---|
-| `G` / `T` / `Leertaste` | Grafik / Terminal / umschalten |
+| `G` / `T` / `N` / `Leertaste` | Grafik / Terminal / Netz / weiterschalten |
 | `1` `2` `3` | Intervall 0,5 s / 1 s / 2 s |
 | `O` | Fenster immer im Vordergrund |
-| `F11` / `Esc` | Vollbild an/aus |
+| `F11` / `Esc` | Vollbild an/aus — auf dem Monitor, auf dem das Fenster gerade liegt |
 | `Strg+Q` | beenden |
 
 Fenstergröße, Ansicht, Intervall und „im Vordergrund" werden beim Beenden in
@@ -46,7 +48,7 @@ Fenstergröße, Ansicht, Intervall und „im Vordergrund" werden beim Beenden in
 
 ## Farben
 
-Wie im Task-Manager: CPU blau, RAM blau-violett, Datenträger grün (Lesen) / hellblau
+Wie im Task-Manager: CPU blau (bei Intel-Hybrid-CPUs P-Kerne blau, E-Kerne grün), RAM blau-violett, Datenträger grün (Lesen) / hellblau
 (Schreiben), Netzwerk pink, GPU violett, VRAM dunkelviolett. Prozentzahlen werden
 zusätzlich grün → gelb → rot eingefärbt.
 
@@ -58,7 +60,9 @@ zusätzlich grün → gelb → rot eingefärbt.
 | `sampler.py` | drei Hintergrund-Threads: schnelle Werte (CPU/RAM/Disk/Netz/Takt), GPU, Prozessliste |
 | `winapi.py` | direkte Windows-/NVIDIA-Schnittstellen (PDH, NVML, ntdll) — siehe Performance |
 | `views.py` | die fünf Grafik-Panels |
-| `terminal.py` | die Terminal-Ansicht |
+| `terminal.py` | die Terminal-Ansicht (und die Text-Basis für NETZ) |
+| `netview.py` | die NETZ-Ansicht mit Werkzeugleiste |
+| `netinfo.py` | Daten für NETZ — eigene Threads, laufen nur, solange die Ansicht offen ist |
 | `draw.py` | Zeichen-Helfer im Retained-Mode (`Scene`) |
 | `theme.py` | Farbschema |
 
@@ -92,4 +96,10 @@ Spalte „Dedizierter GPU-Speicher" im Task-Manager (NVML kann das unter Windows
   einen Kern; der RAM-Wert ist der private Arbeitssatz — ebenfalls wie dort.
 - Ist das Fenster zu schmal für vier Top-Prozess-Spalten nebeneinander, werden sie
   umgebrochen (z. B. 2 × 2) statt abgeschnitten — die VRAM-Spalte bleibt immer sichtbar.
+- P-/E-Kerne kommen aus `GetSystemCpuSetInformation` (EfficiencyClass je logischem
+  Prozessor). Bei CPUs ohne Hybrid-Aufbau (AMD, ältere Intel) bleibt alles blau.
+- Die IP-Konfiguration kommt direkt aus `GetAdaptersAddresses` (~7 ms statt ~6 s über
+  PowerShell), gepingt wird über `IcmpSendEcho` — ohne `ping.exe`.
+- Die öffentliche IP wird nur auf Knopfdruck bei `api.ipify.org` abgefragt, nie
+  automatisch. Gepingt werden Router, DNS-Server und `1.1.1.1` — nur in der NETZ-Ansicht.
 - Bei minimiertem Fenster wird gar nicht gezeichnet.

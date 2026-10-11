@@ -1,6 +1,6 @@
 """SysMon - Multimonitor fuer CPU (alle Kerne), GPU, RAM, Datentraeger und Netzwerk.
 
-Tasten:  G Grafik   T Terminal   Leertaste umschalten
+Tasten:  G Grafik   T Terminal   N Netz & System   Leertaste weiterschalten
          1/2/3 Intervall 0.5s / 1s / 2s
          O immer im Vordergrund   F11 Vollbild   Strg+Q beenden
 """
@@ -9,14 +9,18 @@ import json
 import os
 import tkinter as tk
 
+import netview
 import terminal
 import views
+import winapi
+from netinfo import NetInfo
 from sampler import Sampler
 from theme import THEME, font
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = os.path.join(HERE, "sysmon.json")
 INTERVALS = (0.5, 1.0, 2.0)
+MODES = ("graph", "term", "net")
 
 
 def load_cfg():
@@ -37,13 +41,17 @@ class App(tk.Tk):
         self.minsize(900, 600)
 
         self.mode = self.cfg.get("mode", "graph")
+        if self.mode not in MODES:
+            self.mode = "graph"
         self.interval = float(self.cfg.get("interval", 1.0))
         self.topmost = bool(self.cfg.get("topmost", False))
         self.attributes("-topmost", self.topmost)
         self._full = False
+        self._normal = None            # Geometrie/Zustand vor dem Vollbild
 
         self.sampler = Sampler(self.interval)
         self.sampler.start()
+        self.netinfo = NetInfo(self.sampler.names, self.sampler.nvml.driver)
 
         self._build_topbar()
         self._build_body()
@@ -66,6 +74,7 @@ class App(tk.Tk):
 
         self.btn_graph = self._button(bar, "GRAFIK", lambda: self.set_mode("graph"))
         self.btn_term = self._button(bar, "TERMINAL", lambda: self.set_mode("term"))
+        self.btn_net = self._button(bar, "NETZ", lambda: self.set_mode("net"))
 
         tk.Label(bar, text="   Intervall ", bg=THEME["panel"], fg=THEME["dim"],
                  font=font(9)).pack(side="left")
@@ -125,14 +134,16 @@ class App(tk.Tk):
         self.p_net.cv.grid(row=1, column=0, sticky="nsew", pady=(3, 0))
 
         self.term = terminal.TerminalView(self.body)
+        self.net = netview.NetView(self.body, self.netinfo)
         self.panels = [self.p_cpu, self.p_gpu, self.p_disk, self.p_mem, self.p_net]
 
     # ------------------------------------------------------------------ keys
     def _bind_keys(self):
         self.bind("<KeyPress-g>", lambda e: self.set_mode("graph"))
         self.bind("<KeyPress-t>", lambda e: self.set_mode("term"))
+        self.bind("<KeyPress-n>", lambda e: self.set_mode("net"))
         self.bind("<space>", lambda e: self.set_mode(
-            "term" if self.mode == "graph" else "graph"))
+            MODES[(MODES.index(self.mode) + 1) % len(MODES)]))
         for i, iv in enumerate(INTERVALS):
             self.bind("<KeyPress-%d>" % (i + 1), lambda e, v=iv: self.set_interval(v))
         self.bind("<KeyPress-o>", lambda e: self.toggle_topmost())
@@ -147,12 +158,15 @@ class App(tk.Tk):
         self._render()
 
     def _apply_mode(self):
-        self.graph.pack_forget()
-        self.term.frame.pack_forget()
-        (self.graph if self.mode == "graph" else self.term.frame).pack(
-            fill="both", expand=True)
+        views_by_mode = {"graph": self.graph, "term": self.term.frame,
+                         "net": self.net.frame}
+        for w in views_by_mode.values():
+            w.pack_forget()
+        views_by_mode[self.mode].pack(fill="both", expand=True)
         self._mark(self.btn_graph, self.mode == "graph")
         self._mark(self.btn_term, self.mode == "term")
+        self._mark(self.btn_net, self.mode == "net")
+        self.netinfo.set_active(self.mode == "net")
 
     def set_interval(self, iv):
         self.interval = iv
@@ -166,8 +180,30 @@ class App(tk.Tk):
         self._mark(self.btn_top, self.topmost)
 
     def toggle_full(self):
-        self._full = not self._full
-        self.attributes("-fullscreen", self._full)
+        """Vollbild auf dem Monitor, auf dem das Fenster gerade liegt.
+
+        Tk's "-fullscreen" landet unter Windows immer auf dem Hauptbildschirm,
+        deshalb randloses Fenster in genau der Groesse dieses Monitors.
+        """
+        if not self._full:
+            rect = winapi.monitor_rect(int(self.wm_frame(), 16))
+            if not rect:
+                return
+            self._normal = (self.state(), self.geometry())
+            if self.state() == "zoomed":
+                self.state("normal")
+            x, y, w, h = rect
+            self.overrideredirect(True)
+            self.geometry("%dx%d%+d%+d" % (w, h, x, y))
+            self._full = True
+        else:
+            state, geo = self._normal
+            self.overrideredirect(False)
+            self.geometry(geo)
+            if state == "zoomed":
+                self.state("zoomed")
+            self._full = False
+        self.after(50, self.focus_force)
 
     # ---------------------------------------------------------------- render
     def _tick(self):
@@ -180,6 +216,8 @@ class App(tk.Tk):
         if self.mode == "graph":
             for p in self.panels:
                 p.render(snap)
+        elif self.mode == "net":
+            self.net.render(snap)
         else:
             self.term.render(snap)
         g = snap["gpu"]
@@ -191,11 +229,13 @@ class App(tk.Tk):
     def quit_app(self):
         try:
             with open(CFG, "w", encoding="utf-8") as fh:
-                json.dump({"geometry": self.winfo_geometry(), "mode": self.mode,
+                geo = self._normal[1] if self._full else self.winfo_geometry()
+                json.dump({"geometry": geo, "mode": self.mode,
                            "interval": self.interval, "topmost": self.topmost}, fh)
         except Exception:
             pass
         self.sampler.stop()
+        self.netinfo.stop()
         self.destroy()
 
 

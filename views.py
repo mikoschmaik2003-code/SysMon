@@ -64,7 +64,11 @@ class CpuPanel(Panel):
         sc.text("base", x0 + 84, y0 + 30, "Basis %.2f GHz" % s["cpu_base"],
                 THEME["dim"], 8)
 
-        cols = (("Kerne", "%d / %d" % (s["cores_phys"], s["cores_log"])),
+        types = s.get("core_types")
+        kerne = "%d / %d" % (s["cores_phys"], s["cores_log"])
+        if types:
+            kerne = "%dP + %dE" % (types.count("P"), types.count("E"))
+        cols = (("Kerne", kerne),
                 ("Prozesse", str(pr["processes"])),
                 ("Threads", str(pr["threads"])),
                 ("Handles", format(pr["handles"], ",").replace(",", ".")),
@@ -89,6 +93,9 @@ class CpuPanel(Panel):
         top = gy1 + 16
         sc.text("hdr", x0, top - 8, "LOGISCHE PROZESSOREN  (%d)" % n,
                 THEME["dim"], 8, True)
+        if types:
+            sc.text("lgP", x0 + 230, top - 8, "■ Performance", THEME["cpu"], 8, True)
+            sc.text("lgE", x0 + 340, top - 8, "■ Effizienz", THEME["ecore"], 8, True)
         top += 4
         gw, gh = x1 - x0, y1 - top
         cols_n, rows_n = draw.best_grid(n, gw, gh)
@@ -101,10 +108,14 @@ class CpuPanel(Panel):
             ax1, ay1 = ax0 + cwid - 3, ay0 + chei - 3
             val = cpu["per_core"][i]
             sc.grid("cg%d" % i, ax0, ay0, ax1, ay1, (6, 3))
+            eff = bool(types) and types[i] == "E"
             sc.area("ca%d" % i, ax0, ay0, ax1, ay1, s["h_core"][i],
-                    THEME["cpu"], THEME["cpu_fill"], 100, 1.0)
+                    THEME["ecore"] if eff else THEME["cpu"],
+                    THEME["ecore_fill"] if eff else THEME["cpu_fill"], 100, 1.0)
             if wide:
                 name = "CPU%d" % i
+                if types:
+                    name += " " + types[i]
                 if ghz and cwid > 96:
                     name += "   %.2f GHz" % ghz[i]
                 sc.text("cl%d" % i, ax0 + 3, ay0 + 8, name, THEME["dim"], 7)

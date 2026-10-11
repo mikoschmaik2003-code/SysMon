@@ -13,6 +13,8 @@ THEME = {
     # Metrik-Farben (an den Task-Manager angelehnt)
     "cpu":       "#3fb8e6",
     "cpu_fill":  "#123c50",
+    "ecore":     "#4fd08a",     # Effizienz-Kerne (Intel Hybrid)
+    "ecore_fill": "#113826",
     "mem":       "#5b7fe8",
     "mem_fill":  "#16234a",
     "disk":      "#4fc06a",

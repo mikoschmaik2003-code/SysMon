@@ -4,11 +4,14 @@
   "% Processor Performance" (dieselbe Quelle, aus der auch der Task-Manager liest)
 * GpuProcs   - GPU-Auslastung je Prozess ueber "\\GPU Engine(*)\\Utilization Percentage"
 * GpuProcMem - dedizierter VRAM je Prozess ueber "\\GPU Process Memory(*)\\Dedicated Usage"
+* Adapters   - IP-Konfiguration aller Netzwerkadapter (GetAdaptersAddresses)
+* Pinger     - ICMP-Ping ohne ping.exe (IcmpSendEcho)
 * Nvml       - GPU-Werte direkt aus nvml.dll statt via "nvidia-smi" (5 ms statt ~150 ms)
 """
 
 import collections
 import ctypes
+import socket
 import time
 from ctypes import wintypes
 
@@ -183,6 +186,7 @@ class Nvml:
     def __init__(self):
         self.ok = False
         self.name = ""
+        self.driver = ""
         try:
             self.lib = ctypes.CDLL("nvml.dll")
             if self.lib.nvmlInit_v2() != 0:
@@ -193,6 +197,8 @@ class Nvml:
             buf = ctypes.create_string_buffer(96)
             if self.lib.nvmlDeviceGetName(self.h, buf, 96) == 0:
                 self.name = buf.value.decode("utf-8", "replace")
+            if self.lib.nvmlSystemGetDriverVersion(buf, 96) == 0:
+                self.driver = buf.value.decode("utf-8", "replace")
             self.ok = True
         except Exception:
             self.ok = False
@@ -364,3 +370,256 @@ class ProcTable:
         for pid in [p for p in self._prev if p not in seen]:
             del self._prev[pid]
         return rows, {"processes": procs, "threads": threads, "handles": handles}
+
+
+# ------------------------------------------- Netzwerkadapter (iphlpapi.dll)
+class _SockAddr(ctypes.Structure):
+    _fields_ = [("lpSockaddr", ctypes.c_void_p), ("iSockaddrLength", ctypes.c_int)]
+
+
+class _AddrNode(ctypes.Structure):
+    """Gemeinsamer Kopf von DNS- und Gateway-Eintraegen."""
+
+
+_AddrNode._fields_ = [("Length", ctypes.c_ulong), ("Flags", ctypes.c_ulong),
+                      ("Next", ctypes.POINTER(_AddrNode)), ("Address", _SockAddr)]
+
+
+class _Unicast(ctypes.Structure):
+    pass
+
+
+_Unicast._fields_ = [("Length", ctypes.c_ulong), ("Flags", ctypes.c_ulong),
+                     ("Next", ctypes.POINTER(_Unicast)), ("Address", _SockAddr),
+                     ("PrefixOrigin", ctypes.c_int), ("SuffixOrigin", ctypes.c_int),
+                     ("DadState", ctypes.c_int), ("ValidLifetime", ctypes.c_ulong),
+                     ("PreferredLifetime", ctypes.c_ulong),
+                     ("LeaseLifetime", ctypes.c_ulong),
+                     ("OnLinkPrefixLength", ctypes.c_ubyte)]
+
+
+class _Adapter(ctypes.Structure):
+    """IP_ADAPTER_ADDRESSES_LH bis einschliesslich Dhcpv4Server."""
+
+
+_Adapter._fields_ = [
+    ("Length", ctypes.c_ulong), ("IfIndex", ctypes.c_ulong),
+    ("Next", ctypes.POINTER(_Adapter)),
+    ("AdapterName", ctypes.c_char_p),
+    ("FirstUnicastAddress", ctypes.POINTER(_Unicast)),
+    ("FirstAnycastAddress", ctypes.c_void_p),
+    ("FirstMulticastAddress", ctypes.c_void_p),
+    ("FirstDnsServerAddress", ctypes.POINTER(_AddrNode)),
+    ("DnsSuffix", ctypes.c_wchar_p),
+    ("Description", ctypes.c_wchar_p),
+    ("FriendlyName", ctypes.c_wchar_p),
+    ("PhysicalAddress", ctypes.c_ubyte * 8),
+    ("PhysicalAddressLength", ctypes.c_ulong),
+    ("Flags", ctypes.c_ulong),
+    ("Mtu", ctypes.c_ulong),
+    ("IfType", ctypes.c_ulong),
+    ("OperStatus", ctypes.c_int),
+    ("Ipv6IfIndex", ctypes.c_ulong),
+    ("ZoneIndices", ctypes.c_ulong * 16),
+    ("FirstPrefix", ctypes.c_void_p),
+    ("TransmitLinkSpeed", ctypes.c_ulonglong),
+    ("ReceiveLinkSpeed", ctypes.c_ulonglong),
+    ("FirstWinsServerAddress", ctypes.c_void_p),
+    ("FirstGatewayAddress", ctypes.POINTER(_AddrNode)),
+    ("Ipv4Metric", ctypes.c_ulong),
+    ("Ipv6Metric", ctypes.c_ulong),
+    ("Luid", ctypes.c_ulonglong),
+    ("Dhcpv4Server", _SockAddr),
+]
+
+
+def _sockaddr_str(sa):
+    """SOCKET_ADDRESS -> (Familie 4/6, Text) oder (0, "")."""
+    if not sa.lpSockaddr:
+        return 0, ""
+    fam = ctypes.c_ushort.from_address(sa.lpSockaddr).value
+    if fam == 2:
+        raw = ctypes.string_at(sa.lpSockaddr + 4, 4)
+        return 4, socket.inet_ntop(socket.AF_INET, raw)
+    if fam == 23:
+        raw = ctypes.string_at(sa.lpSockaddr + 8, 16)
+        return 6, socket.inet_ntop(socket.AF_INET6, raw)
+    return 0, ""
+
+
+def _walk(node):
+    while node:
+        yield node.contents
+        node = node.contents.Next
+
+
+def _mask(prefix):
+    bits = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0
+    return ".".join(str((bits >> s) & 0xFF) for s in (24, 16, 8, 0))
+
+
+class Adapters:
+    """Alles aus "ipconfig /all" in ~1 ms statt ~6 s ueber PowerShell."""
+
+    GAA_FLAGS = 0x0002 | 0x0004 | 0x0080   # ohne Any-/Multicast, mit Gateways
+    DHCP_ENABLED = 0x4
+    IF_LOOPBACK = 24
+
+    def __init__(self):
+        self._size = 32 * 1024
+        try:
+            self.lib = ctypes.WinDLL("iphlpapi.dll")
+            self.ok = True
+        except Exception:
+            self.ok = False
+
+    def read(self):
+        if not self.ok:
+            return []
+        rc = -1
+        for _ in range(4):
+            buf = ctypes.create_string_buffer(self._size)
+            size = ctypes.c_ulong(self._size)
+            rc = self.lib.GetAdaptersAddresses(0, self.GAA_FLAGS, None, buf,
+                                               ctypes.byref(size))
+            if rc != 111:                  # ERROR_BUFFER_OVERFLOW
+                break
+            self._size = size.value + 4096
+        if rc != 0:
+            return []
+
+        out = []
+        for a in _walk(ctypes.cast(buf, ctypes.POINTER(_Adapter))):
+            if a.IfType == self.IF_LOOPBACK:
+                continue
+            v4, v6 = [], []
+            for u in _walk(a.FirstUnicastAddress):
+                fam, ip = _sockaddr_str(u.Address)
+                if fam == 4:
+                    v4.append((ip, u.OnLinkPrefixLength, _mask(u.OnLinkPrefixLength)))
+                elif fam == 6:
+                    v6.append((ip, u.OnLinkPrefixLength))
+            gw = [_sockaddr_str(g.Address)[1] for g in _walk(a.FirstGatewayAddress)]
+            dns = [_sockaddr_str(d.Address) for d in _walk(a.FirstDnsServerAddress)]
+            mac = "-".join("%02X" % b for b in
+                           a.PhysicalAddress[: a.PhysicalAddressLength])
+            out.append({
+                "name": a.FriendlyName or "",
+                "desc": a.Description or "",
+                "up": a.OperStatus == 1,
+                "mac": mac,
+                "mtu": a.Mtu,
+                "speed": a.ReceiveLinkSpeed if a.ReceiveLinkSpeed < 1 << 62 else 0,
+                "dhcp": bool(a.Flags & self.DHCP_ENABLED),
+                "dhcp_server": _sockaddr_str(a.Dhcpv4Server)[1],
+                "suffix": a.DnsSuffix or "",
+                "v4": v4, "v6": v6,
+                "gw": sorted((g for g in gw if g), key=lambda g: ":" in g),
+                "dns": [ip for fam, ip in dns if fam == 4] +
+                       [ip for fam, ip in dns if fam == 6],
+                "metric": a.Ipv4Metric,
+            })
+        return out
+
+
+# ----------------------------------------------------------- Ping (ICMP)
+class _IcmpReply(ctypes.Structure):
+    _fields_ = [("Address", ctypes.c_ulong), ("Status", ctypes.c_ulong),
+                ("RoundTripTime", ctypes.c_ulong), ("DataSize", ctypes.c_ushort),
+                ("Reserved", ctypes.c_ushort), ("Data", ctypes.c_void_p),
+                ("Ttl", ctypes.c_ubyte), ("Tos", ctypes.c_ubyte),
+                ("OFlags", ctypes.c_ubyte), ("OptionsSize", ctypes.c_ubyte),
+                ("OptionsData", ctypes.c_void_p)]
+
+
+class Pinger:
+    """ICMP-Echo direkt ueber IcmpSendEcho - kein ping.exe, kein Konsolenfenster."""
+
+    def __init__(self):
+        self.ok = False
+        try:
+            self.lib = ctypes.WinDLL("iphlpapi.dll")
+            self.lib.IcmpCreateFile.restype = wintypes.HANDLE
+            self.lib.IcmpSendEcho.argtypes = [
+                wintypes.HANDLE, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ushort,
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong]
+            self.h = self.lib.IcmpCreateFile()
+            self.ok = bool(self.h) and self.h != wintypes.HANDLE(-1).value
+        except Exception:
+            self.ok = False
+        self._data = ctypes.create_string_buffer(b"sysmon-ping", 32)
+        self._reply = ctypes.create_string_buffer(ctypes.sizeof(_IcmpReply) + 64)
+
+    def ping(self, ip, timeout_ms=1000):
+        """Antwortzeit in ms oder None (Timeout / nicht erreichbar)."""
+        if not self.ok:
+            return None
+        try:
+            addr = int.from_bytes(socket.inet_aton(ip), "little")
+        except OSError:
+            return None
+        n = self.lib.IcmpSendEcho(self.h, addr, self._data, 32, None,
+                                  self._reply, len(self._reply), timeout_ms)
+        if not n:
+            return None
+        r = _IcmpReply.from_buffer(self._reply)
+        return float(r.RoundTripTime) if r.Status == 0 else None
+
+
+# ------------------------------------------------- Monitor unter dem Fenster
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def monitor_rect(hwnd):
+    """(x, y, w, h) des Bildschirms, auf dem das Fenster ueberwiegend liegt."""
+    try:
+        u = ctypes.windll.user32
+        u.MonitorFromWindow.restype = wintypes.HANDLE
+        u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        mon = u.MonitorFromWindow(hwnd, 2)          # MONITOR_DEFAULTTONEAREST
+        mi = _MonitorInfo()
+        mi.cbSize = ctypes.sizeof(_MonitorInfo)
+        if not u.GetMonitorInfoW(mon, ctypes.byref(mi)):
+            return None
+        r = mi.rcMonitor
+        return r.left, r.top, r.right - r.left, r.bottom - r.top
+    except Exception:
+        return None
+
+
+# ------------------------------------------------- P-/E-Kerne (Intel Hybrid)
+def core_types(ncores):
+    """Liste "P"/"E" je logischem Prozessor - oder None, wenn alle Kerne gleich sind.
+
+    GetSystemCpuSetInformation liefert je logischem Prozessor eine
+    EfficiencyClass: bei Hybrid-CPUs haben die Performance-Kerne die hoehere
+    Klasse, die Effizienz-Kerne 0. Auf AMD/aelteren Intel sind alle gleich.
+    """
+    try:
+        k = ctypes.windll.kernel32
+        need = wintypes.ULONG(0)
+        k.GetSystemCpuSetInformation(None, 0, ctypes.byref(need), None, 0)
+        if not need.value:
+            return None
+        buf = ctypes.create_string_buffer(need.value)
+        if not k.GetSystemCpuSetInformation(buf, need.value, ctypes.byref(need),
+                                            None, 0):
+            return None
+        raw, off, cpus = buf.raw, 0, []
+        while off + 19 <= need.value:
+            size = int.from_bytes(raw[off:off + 4], "little")
+            if not size:
+                break
+            if int.from_bytes(raw[off + 4:off + 8], "little") == 0:  # CpuSetInformation
+                group = int.from_bytes(raw[off + 12:off + 14], "little")
+                cpus.append(((group, raw[off + 14]), raw[off + 18]))
+            off += size
+        classes = {c for _, c in cpus}
+        if len(classes) < 2 or len(cpus) < ncores:
+            return None
+        top = max(classes)
+        return ["P" if c == top else "E" for _, c in sorted(cpus)][:ncores]
+    except Exception:
+        return None

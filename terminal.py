@@ -28,10 +28,13 @@ def heat_tag(pct):
     return {THEME["ok"]: "ok", THEME["warn"]: "warn"}.get(col, "crit")
 
 
-class TerminalView:
+class TextView:
+    """Basis fuer alle Text-Ansichten: Zeilen sammeln, dann in einem Rutsch zeigen."""
+
     TAGS = {
         "dim": THEME["dim"], "hi": THEME["text_hi"], "txt": THEME["text"],
         "cpu": THEME["cpu"], "gpu": THEME["gpu"], "mem": THEME["mem"],
+        "ecore": THEME["ecore"],
         "disk": THEME["disk"], "net": THEME["net"], "vram": THEME["vram"],
         "wr": "#7ad2f0", "up": "#f2a0c0",
         "ok": THEME["ok"], "warn": THEME["warn"], "crit": THEME["crit"],
@@ -44,7 +47,7 @@ class TerminalView:
         self.txt = tk.Text(self.frame, bg="#05080b", fg=THEME["text"], bd=0,
                            highlightthickness=0, font=self.font, wrap="none",
                            padx=14, pady=10, insertwidth=0, cursor="arrow")
-        self.txt.pack(fill="both", expand=True)
+        self.txt.pack(side="bottom", fill="both", expand=True)
         for name, col in self.TAGS.items():
             self.txt.tag_configure(name, foreground=col)
         self.txt.bind("<Key>", lambda e: "break")
@@ -63,19 +66,12 @@ class TerminalView:
         t = ("── " + title + " ") if title else ""
         self._line((t, "dim"), ("─" * max(0, self.c - len(t)), "dim"))
 
-    # ---------------------------------------------------------------- render
-    def render(self, s):
+    def _begin(self):
         self.buf = []
         self.c = self.cols()
-        self._header(s)
-        self._cpu(s)
-        self._gpu(s)
-        self._mem(s)
-        self._disk(s)
-        self._net(s)
-        self._top(s)
 
-        # ein String + je Farbe ein tag_add
+    def _flush(self):
+        """ein String + je Farbe ein tag_add"""
         parts, ranges = [], {}
         for ln, segs in enumerate(self.buf, 1):
             col = 0
@@ -106,6 +102,19 @@ class TerminalView:
         t.configure(state="disabled")
         t.yview_moveto(yview)
 
+
+class TerminalView(TextView):
+    def render(self, s):
+        self._begin()
+        self._header(s)
+        self._cpu(s)
+        self._gpu(s)
+        self._mem(s)
+        self._disk(s)
+        self._net(s)
+        self._top(s)
+        self._flush()
+
     # ------------------------------------------------------------ Abschnitte
     def _header(self, s):
         left = " SYSMON  " + self.host
@@ -130,13 +139,21 @@ class TerminalView:
         self._line()
 
         cores = cpu["per_core"]
+        types = s.get("core_types")
+        if types:
+            self._line(("  ████ ", "cpu"), ("P-Kerne (Performance) %d" % types.count("P"), "dim"),
+                       ("     ████ ", "ecore"),
+                       ("E-Kerne (Effizienz) %d" % types.count("E"), "dim"))
         width = 33 if ghz else 26
         per = max(1, (self.c - 2) // width)
         for i in range(0, len(cores), per):
             segs = []
             for j in range(i, min(i + per, len(cores))):
                 v = cores[j]
-                segs += ([("  c%02d [" % j, "dim")] + bar_segs(v, 12, "cpu") +
+                kind = types[j] if types else ""
+                tag = "ecore" if kind == "E" else "cpu"
+                segs += ([("  %s%02d [" % (kind or "c", j),
+                           "dim")] + bar_segs(v, 12, tag) +
                          [("] ", "dim"), ("%3.0f%%" % v, heat_tag(v))])
                 if ghz:
                     segs.append((" %5.2fGHz" % ghz[j], "dim"))

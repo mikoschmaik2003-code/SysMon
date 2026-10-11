@@ -52,6 +52,7 @@ class Sampler:
         self.cores_log = psutil.cpu_count(logical=True) or 1
 
         self.clocks = winapi.CoreClocks(self.cpu_base_ghz, self.cores_log)
+        self.core_types = winapi.core_types(self.cores_log)   # None = alle gleich
         self.nvml = winapi.Nvml()
         self.gpu_procs = winapi.GpuProcs()
         self.gpu_mem = winapi.GpuProcMem()
@@ -80,6 +81,7 @@ class Sampler:
         self.top_mem = []         # groesste Verbraucher (RAM)
         self.top_gpu = []         # groesste Verbraucher (GPU)
         self.top_vram = []        # groesste Verbraucher (VRAM, Bytes)
+        self.pid_names = {}       # pid -> Prozessname (fuer die Port-Liste)
         self.disk_labels = {}     # PhysicalDriveN -> "Disk 0 (C:)"
         self.net_peak = 1.0
 
@@ -269,6 +271,7 @@ class Sampler:
             self.top_mem = top_mem
             self.top_gpu = top_gpu
             self.top_vram = top_vram
+            self.pid_names = {r["pid"]: r["name"] for r in rows}
 
     def _map_disks(self):
         """PhysicalDriveN -> Laufwerksbuchstaben (einmalig via PowerShell)."""
@@ -291,6 +294,10 @@ class Sampler:
         except Exception:
             pass
 
+    def names(self):
+        with self.lock:
+            return self.pid_names
+
     # --------------------------------------------------------------- Snapshot
     def snapshot(self):
         with self.lock:
@@ -301,6 +308,7 @@ class Sampler:
                 "cpu_base": self.cpu_base_ghz,
                 "cores_phys": self.cores_phys,
                 "cores_log": self.cores_log,
+                "core_types": self.core_types,
                 "h_cpu": list(self.h_cpu),
                 "h_core": [list(r) for r in self.h_core],
                 "mem": dict(self.mem),

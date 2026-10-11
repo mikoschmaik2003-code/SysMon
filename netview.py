@@ -6,6 +6,7 @@ import datetime
 import os
 import tkinter as tk
 
+import privacy
 from terminal import TextView, bar_segs, heat_tag
 from theme import THEME, font, human_bytes
 from views import fmt_uptime
@@ -111,7 +112,7 @@ class NetView(TextView):
         self._flush()
 
     def _header(self, s, n):
-        left = " NETZ & SYSTEM  " + n["system"]["host"]
+        left = " NETZ & SYSTEM  " + privacy.host(n["system"]["host"])
         right = "uptime " + fmt_uptime(s["uptime"]) + " "
         pad = max(1, self.c - len(left) - len(right) - 2)
         self._line(("┌" + left, "net"), ("─" * pad, "dim"), (right + "┐", "dim"))
@@ -123,7 +124,7 @@ class NetView(TextView):
         self._rule("IP-KONFIGURATION")
         pub = n["public_ip"]
         self._line(("  oeffentliche IP   ", "dim"),
-                   (pub, "ip") if pub else ("-  (Knopf OEFFENTLICHE IP)", "dim"))
+                   (privacy.ip(pub), "ip") if pub else ("-  (Knopf OEFFENTLICHE IP)", "dim"))
         self._line()
         down = []
         for a in n["adapters"]:
@@ -141,7 +142,7 @@ class NetView(TextView):
             glob = [v for v in a["v6"] if not v[0].startswith("fe80")]
             link = [v for v in a["v6"] if v[0].startswith("fe80")]
             for ip, pre in (glob[:2] + link[:1]):
-                self._line(("    IPv6            ", "dim"), (ip, "ip"),
+                self._line(("    IPv6            ", "dim"), (privacy.ip(ip), "ip"),
                            ("/%d" % pre, "dim"))
             if len(glob) > 2:
                 self._line(("                    + %d weitere IPv6" % (len(glob) - 2),
@@ -149,18 +150,18 @@ class NetView(TextView):
             if a["gw"]:
                 segs = [("    Gateway         ", "dim")]
                 for g in a["gw"]:
-                    segs += [(g, "ip"), ("   ", None)]
+                    segs += [(privacy.ip(g), "ip"), ("   ", None)]
                 self._line(*segs)
             if a["dns"]:
                 segs = [("    DNS             ", "dim")]
                 for d in a["dns"][:3]:
-                    segs += [(d, "ip"), ("   ", None)]
+                    segs += [(privacy.ip(d), "ip"), ("   ", None)]
                 self._line(*segs)
             dh = ("DHCP an" + (" (Server %s)" % a["dhcp_server"]
                                if a["dhcp_server"] else "")) if a["dhcp"] else "statisch"
-            self._line(("    MAC             ", "dim"), (a["mac"] or "-", "txt"),
+            self._line(("    MAC             ", "dim"), (privacy.mac(a["mac"]) or "-", "txt"),
                        ("   MTU %d   %s" % (a["mtu"], dh), "dim"),
-                       (("   Suffix " + a["suffix"]) if a["suffix"] else "", "dim"))
+                       (("   Suffix " + privacy.text(a["suffix"])) if a["suffix"] else "", "dim"))
             if rate:
                 self._line(("    Durchsatz       ", "dim"), ("↓ " + _rate(rate[0]), "net"),
                            ("   ↑ " + _rate(rate[1]), "up"))
@@ -233,7 +234,8 @@ class NetView(TextView):
         self._rule("SYSTEM")
         boot = datetime.datetime.fromtimestamp(y["boot"]).strftime("%d.%m.%Y %H:%M")
         rows = [
-            ("Rechner", "%s   (Benutzer %s)" % (y["host"], y["user"])),
+            ("Rechner", "%s   (Benutzer %s)" % (privacy.host(y["host"]),
+                                                privacy.user(y["user"]))),
             ("Windows", "%s   %s" % (y["windows"], y["winver"])),
             ("Gestartet", boot),
             ("CPU", s["cpu_name"]),

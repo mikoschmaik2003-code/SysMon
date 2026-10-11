@@ -1,6 +1,7 @@
 """SysMon - Multimonitor fuer CPU (alle Kerne), GPU, RAM, Datentraeger und Netzwerk.
 
 Tasten:  G Grafik   T Terminal   N Netz & System   Leertaste weiterschalten
+         A Anonym-Modus (fuer Screenshots)
          1/2/3 Intervall 0.5s / 1s / 2s
          O immer im Vordergrund   F11 Vollbild   Strg+Q beenden
 """
@@ -10,6 +11,7 @@ import os
 import tkinter as tk
 
 import netview
+import privacy
 import terminal
 import views
 import winapi
@@ -85,6 +87,7 @@ class App(tk.Tk):
 
         self.btn_top = self._button(bar, "IM VORDERGRUND", self.toggle_topmost)
         self._button(bar, "VOLLBILD", self.toggle_full)
+        self.btn_anon = self._button(bar, "ANONYM", self.toggle_privacy)
 
         self.status = tk.Label(bar, text="", bg=THEME["panel"], fg=THEME["dim"],
                                font=font(9))
@@ -147,6 +150,7 @@ class App(tk.Tk):
         for i, iv in enumerate(INTERVALS):
             self.bind("<KeyPress-%d>" % (i + 1), lambda e, v=iv: self.set_interval(v))
         self.bind("<KeyPress-o>", lambda e: self.toggle_topmost())
+        self.bind("<KeyPress-a>", lambda e: self.toggle_privacy())
         self.bind("<F11>", lambda e: self.toggle_full())
         self.bind("<Escape>", lambda e: self._full and self.toggle_full())
         self.bind("<Control-q>", lambda e: self.quit_app())
@@ -178,6 +182,11 @@ class App(tk.Tk):
         self.topmost = not self.topmost
         self.attributes("-topmost", self.topmost)
         self._mark(self.btn_top, self.topmost)
+
+    def toggle_privacy(self):
+        privacy.ON = not privacy.ON
+        self._mark(self.btn_anon, privacy.ON)
+        self._render()
 
     def toggle_full(self):
         """Vollbild auf dem Monitor, auf dem das Fenster gerade liegt.

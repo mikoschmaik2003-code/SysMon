@@ -9,6 +9,8 @@ import socket
 import tkinter as tk
 import tkinter.font as tkfont
 
+import privacy
+
 from theme import THEME, heat, human_bytes, mbps
 from views import fmt_uptime, nice_max, pct_str
 
@@ -117,7 +119,7 @@ class TerminalView(TextView):
 
     # ------------------------------------------------------------ Abschnitte
     def _header(self, s):
-        left = " SYSMON  " + self.host
+        left = " SYSMON  " + privacy.host(self.host)
         right = "uptime " + fmt_uptime(s["uptime"]) + " "
         pad = max(1, self.c - len(left) - len(right) - 2)
         self._line(("┌" + left, "cpu"), ("─" * pad, "dim"), (right + "┐", "dim"))

@@ -6,6 +6,19 @@ Takt, Lüfter), RAM, alle Datenträger mit MB/s und IO/s sowie Netzwerk — plus
 zweite, komplett andere Optik im Linux-Terminal-Stil und eine Netz-&-System-Ansicht
 mit IP-Konfiguration, Ping und nützlichen Werkzeugen.
 
+![Grafik-Ansicht](screenshots/grafik.png)
+
+<table>
+<tr>
+<td><img src="screenshots/terminal.png" alt="Terminal-Ansicht"></td>
+<td><img src="screenshots/netz.png" alt="Netz-Ansicht"></td>
+</tr>
+<tr>
+<td align="center"><b>TERMINAL</b> — mit Top-Prozessen nach CPU, RAM, GPU und VRAM</td>
+<td align="center"><b>NETZ</b> — IP-Konfiguration, Ping, Ports, Laufwerke, System</td>
+</tr>
+</table>
+
 ## Installation
 
 Läuft nur unter **Windows 10/11**. Gebraucht wird
@@ -40,6 +53,7 @@ SysMon.bat
 | `G` / `T` / `N` / `Leertaste` | Grafik / Terminal / Netz / weiterschalten |
 | `1` `2` `3` | Intervall 0,5 s / 1 s / 2 s |
 | `O` | Fenster immer im Vordergrund |
+| `A` | Anonym-Modus: verdeckt Rechner-/Benutzername, MAC, IPv6 und öffentliche IP — für Screenshots |
 | `F11` / `Esc` | Vollbild an/aus — auf dem Monitor, auf dem das Fenster gerade liegt |
 | `Strg+Q` | beenden |
 
@@ -62,6 +76,7 @@ zusätzlich grün → gelb → rot eingefärbt.
 | `views.py` | die fünf Grafik-Panels |
 | `terminal.py` | die Terminal-Ansicht (und die Text-Basis für NETZ) |
 | `netview.py` | die NETZ-Ansicht mit Werkzeugleiste |
+| `privacy.py` | Anonym-Modus |
 | `netinfo.py` | Daten für NETZ — eigene Threads, laufen nur, solange die Ansicht offen ist |
 | `draw.py` | Zeichen-Helfer im Retained-Mode (`Scene`) |
 | `theme.py` | Farbschema |
@@ -103,3 +118,10 @@ Spalte „Dedizierter GPU-Speicher" im Task-Manager (NVML kann das unter Windows
 - Die öffentliche IP wird nur auf Knopfdruck bei `api.ipify.org` abgefragt, nie
   automatisch. Gepingt werden Router, DNS-Server und `1.1.1.1` — nur in der NETZ-Ansicht.
 - Bei minimiertem Fenster wird gar nicht gezeichnet.
+
+## Mitwirkende
+
+- **Maik Mikosch** ([@mikoschmaik2003-code](https://github.com/mikoschmaik2003-code)) — Idee, Anforderungen, Tests
+- **Claude** (KI-Assistent von [Anthropic](https://www.anthropic.com)) — Programmierung
+
+Die Screenshots sind im Anonym-Modus entstanden.
